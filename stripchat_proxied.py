@@ -129,28 +129,27 @@ class StripchatProxy(Plugin):
             # Construct the proxy URL with the M3U8 URL as a query parameter
             proxy_url = f"http://{host}:{port}/?url={quote(m3u8_url)}"
 
-            # Fetch the M3U8 from the proxy (it should be decrypted)
+            # Fetch the M3U8 from the proxy
             m3u8_res = self.session.http.get(proxy_url, headers=headers)
             raw_m3u8 = m3u8_res.text
 
-            # Save to temporary file and parse
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.m3u8', delete=False) as temp_file:
+            # Use a fixed file in the plugin directory (overwrites on next use)
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            temp_file_path = os.path.join(plugin_dir, 'stripchat_temp.m3u8')
+            with open(temp_file_path, 'w') as temp_file:
                 temp_file.write(raw_m3u8)
-                temp_file_path = temp_file.name
 
             # Use pathlib to create a cross-platform file:// URL
             temp_path = Path(temp_file_path)
-            file_url = temp_path.as_uri()  # Generates file:///path on any OS
+            file_url = temp_path.as_uri()
 
             # Parse the streams
             streams = HLSStream.parse_variant_playlist(self.session, file_url, headers=headers)
+
             yield from streams.items()
 
-        finally:
-            # Clean up the temp file to prevent accumulation
-            try:
-                os.unlink(temp_file_path)
-            except OSError:
-                pass  # Ignore if file doesn't exist or can't be deleted
+        except Exception as e:
+            self.logger.error(f"Failed to fetch or parse M3U8: {e}")
+            return
 
 __plugin__ = StripchatProxy
