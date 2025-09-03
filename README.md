@@ -11,7 +11,7 @@ Additionally, you need a file called `key.txt` in the same directory, containing
 ## Usage from the command line
 
 ```
-streamlink http://localhost:8080/stripchat/<username> <quality>
+streamlink --player-passthrough hls http://localhost:8080/stripchat/<username> <quality>
 ```
 
 Instead of the normal stripchat URL plus username, you will be using the proxied URL. 8080 is the port number to use. You can put any port number you like in there, as long as it is not used by another service.
@@ -24,5 +24,7 @@ The proxy will start automatically when you use the proxied URL with streamlink.
 - Linux not tested, may not work at all
 
 ## Notes
+
+- Working and tested on Windows and MacOS, Linux untested
 
 This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin. It is completely vibe coded, so expect bugs and issues.
