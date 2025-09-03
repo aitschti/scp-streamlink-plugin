@@ -1,3 +1,4 @@
+from asyncio import streams
 import re
 import io  # Added import for io
 import tempfile  # Added import for tempfile
@@ -7,6 +8,7 @@ import time  # Added for delay
 import os  # Added for path
 from typing import Optional
 from urllib.parse import urlparse, quote
+from pathlib import Path  # Add this import for cross-platform path handling
 
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
@@ -136,11 +138,19 @@ class StripchatProxy(Plugin):
                 temp_file.write(raw_m3u8)
                 temp_file_path = temp_file.name
 
-            # Convert Windows path to file:// URL
-            file_url = f"file:///{temp_file_path.replace('\\', '/')}"
+            # Use pathlib to create a cross-platform file:// URL
+            temp_path = Path(temp_file_path)
+            file_url = temp_path.as_uri()  # Generates file:///path on any OS
+
+            # Parse the streams
             streams = HLSStream.parse_variant_playlist(self.session, file_url, headers=headers)
             yield from streams.items()
-        except Exception as err:
-            self.logger.error(f"Failed to fetch or parse M3U8 from proxy: {err}")
+
+        finally:
+            # Clean up the temp file to prevent accumulation
+            try:
+                os.unlink(temp_file_path)
+            except OSError:
+                pass  # Ignore if file doesn't exist or can't be deleted
 
 __plugin__ = StripchatProxy
