@@ -19,11 +19,10 @@ The proxy will start automatically when you use the proxied URL with streamlink.
 
 ## Limitations
 
-- Working on Windows only at the moment
-- Mac playback only works for the first segment
+- Working fine on Windows only at the moment
+- Mac playback only works for the first segment, then stops (VLC)
 - Linux not tested, may not work at all
-- No cleanup of temp files (uses a temp file for the decryptedplaylist)
 
 ## Notes
 
-This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin. It was vibe coded in an hour, so expect bugs and issues.
+This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin. It is completely vibe coded, so expect bugs and issues.
