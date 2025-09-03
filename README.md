@@ -19,8 +19,10 @@ The proxy will start automatically when you use the proxied URL with streamlink.
 
 ## Limitations
 
-- Windows only at the moment
-- No cleanup of temp files
+- Working on Windows only at the moment
+- Mac playback only works for the first segment
+- Linux not tested, may not work at all
+- No cleanup of temp files (uses a temp file for the decryptedplaylist)
 
 ## Notes
 
