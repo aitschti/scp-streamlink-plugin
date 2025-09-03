@@ -19,4 +19,4 @@ The proxy will start automatically when you use the proxied URL with streamlink.
 
 ## Notes
 
-This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin. It was vibe coded in a hour, so expect bugs and issues.
+This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin. It was vibe coded in an hour, so expect bugs and issues.
