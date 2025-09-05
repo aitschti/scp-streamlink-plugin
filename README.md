@@ -23,7 +23,7 @@ streamlink --player-external-http http://localhost:<port>/stripchat/<username> <
 
 With specific port:
 
-streamlink --player-external-http --player-external-port <external_port> http://localhost:<port>/stripchat/<username> <quality>
+streamlink --player-external-http --player-external-http-port <external_port> http://localhost:<port>/stripchat/<username> <quality>
 
 URL to open:
 http://<ip from command log>:<external_port or from command log>
