@@ -129,8 +129,13 @@ class StripchatProxy(Plugin):
             # Construct the proxy URL with the M3U8 URL as a query parameter
             proxy_url = f"http://{host}:{port}/?url={quote(m3u8_url)}"
 
-            # Yield the HLS stream directly from the proxy URL (no temp file needed)
-            yield "source", HLSStream(self.session, proxy_url, headers=headers)
+            # Fetch the M3U8 from the proxy
+            m3u8_res = self.session.http.get(proxy_url, headers=headers)
+            raw_m3u8 = m3u8_res.text
+
+            # Parse the variant playlist to get individual streams
+            streams = HLSStream.parse_variant_playlist(self.session, proxy_url, headers=headers)
+            yield from streams.items()
 
         except Exception as e:
             self.logger.error(f"Failed to fetch or parse M3U8: {e}")
