@@ -9,6 +9,7 @@ import os  # Added for path
 from typing import Optional
 from urllib.parse import urlparse, quote
 from pathlib import Path  # Add this import for cross-platform path handling
+import streamlink  # Add this import for version checking
 
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
@@ -41,7 +42,13 @@ class StripchatProxy(Plugin):
     )
 
     def __init__(self, session, url: str, options: Optional[Arguments] = None):
-        super().__init__(session, url, options)
+        # Check Streamlink version for compatibility (options added in 6.0.0)
+        version = tuple(map(int, streamlink.__version__.split('.')))
+        if version >= (6, 0, 0):
+            super().__init__(session, url, options)
+        else:
+            super().__init__(session, url)
+        
         self.author: Optional[str] = None
         self.title: Optional[str] = None
 
