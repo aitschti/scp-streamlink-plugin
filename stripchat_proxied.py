@@ -18,7 +18,7 @@ from streamlink.exceptions import PluginError
 from streamlink.options import Arguments
 
 @pluginmatcher(re.compile(
-    r"http://localhost(?::\d+)?/stripchat/(?P<username>[a-zA-Z0-9_-]+)(?:/.*)?$",
+    r"http://localhost(?::\d+)?/stripchat/(?P<username>[a-zA-Z0-9_-]+(?:\.m3u8)?)(?:/.*)?$",
     re.IGNORECASE
 ))
 class StripchatProxy(Plugin):
@@ -93,6 +93,8 @@ class StripchatProxy(Plugin):
 
     def _get_streams(self):
         username = self.match.group("username")
+        if username.endswith('.m3u8'):
+            username = username[:-5]  # Strip .m3u8 from username
         if not username:
             raise PluginError("Invalid username in proxy URL")
 
@@ -131,18 +133,28 @@ class StripchatProxy(Plugin):
                 return
 
             stream_name = data["cam"]["streamName"]
-            m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}.m3u8"
+            m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}_auto.m3u8"
+            m3u8_url_fallback = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}.m3u8"
 
-            # Construct the proxy URL with the M3U8 URL as a query parameter
-            proxy_url = f"http://{host}:{port}/?url={quote(m3u8_url)}"
-
-            # Fetch the M3U8 from the proxy
-            m3u8_res = self.session.http.get(proxy_url, headers=headers)
-            raw_m3u8 = m3u8_res.text
-
-            # Parse the variant playlist to get individual streams
-            streams = HLSStream.parse_variant_playlist(self.session, proxy_url, headers=headers)
-            yield from streams.items()
+            # Try primary M3U8 URL first
+            try:
+                proxy_url = f"http://{host}:{port}/?url={quote(m3u8_url)}"
+                m3u8_res = self.session.http.get(proxy_url, headers=headers)
+                raw_m3u8 = m3u8_res.text
+                streams = HLSStream.parse_variant_playlist(self.session, proxy_url, headers=headers)
+                yield from streams.items()
+            except Exception as e:
+                self.logger.warning(f"Failed with primary M3U8 URL: {e}, trying fallback")
+                # Try fallback M3U8 URL
+                try:
+                    proxy_url = f"http://{host}:{port}/?url={quote(m3u8_url_fallback)}"
+                    m3u8_res = self.session.http.get(proxy_url, headers=headers)
+                    raw_m3u8 = m3u8_res.text
+                    streams = HLSStream.parse_variant_playlist(self.session, proxy_url, headers=headers)
+                    yield from streams.items()
+                except Exception as e2:
+                    self.logger.error(f"Failed with fallback M3U8 URL: {e2}")
+                    return
 
         except Exception as e:
             self.logger.error(f"Failed to fetch or parse M3U8: {e}")
