@@ -30,7 +30,7 @@ http://<ip from command log>:<external_port or from command log>
 
 ```
 
-Instead of the normal stripchat URL plus username, you will be using the proxied URL. `<port>` is the port number to use. You can put any port number you like in there (e.g. 8080), as long as it is not used by another service. The proxy will start automatically in the background when you open the streamlink command. Multiple instances should be possible this way using different ports. `<quality>` is your choice of stream quality (e.g. `best`, `worst`, `720p`, etc.).
+Instead of the normal stripchat URL plus username, you will be using the proxied URL. `<port>` is the port number to use. You can put any port number you like in there (e.g. 8080), as long as it is not used by another service. The proxy will start automatically in the background when you open the streamlink command. Multiple instances should be possible this way using different ports. `<quality>` is your choice of stream quality (e.g. `best`, `worst`, `720p`, etc.), if available. Starting streamlink without quality option, streamlink will show all available qualities as usual.
 
 When using `--player-external-http`, you may need to adjust your firewall settings to allow incoming connections on the specified port `<external_port>` or the one you see in the command output.
 
