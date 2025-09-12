@@ -1,9 +1,8 @@
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import urllib.request
 import urllib.parse
-import urllib.error
-import socket
+import requests
+from requests.adapters import HTTPAdapter
 import base64
 import hashlib
 import gzip
@@ -17,9 +16,17 @@ import argparse
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Global session for connection reuse
+_global_session = requests.Session()
+
+# Changeable connection pool size to handle more concurrent requests (default: 10)
+adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+_global_session.mount('https://', adapter)
+_global_session.mount('http://', adapter)
+
 # Basic headers to forward when fetching original resources
 FORWARD_HEADERS = {
-    'Referer': 'https://stripchat.com',
+    'Referer': 'https://stripchat.com/',
     'Origin': 'https://stripchat.com',
     'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.182 Safari/537.36",
     'Accept': '*/*'
@@ -150,23 +157,25 @@ def _force_web_playlist_url(url: str) -> str:
         pass
     return url
 
-def _fetch_with_retries(url, headers=None, timeout=REQUEST_TIMEOUT, retries=MAX_FETCH_RETRIES):
-    """Fetch URL with a few retries. Returns a response or raises last exception.
-    If an HTTPError occurs it is returned (caller should inspect .code)."""
+def _fetch_with_retries(url, headers=None, timeout=REQUEST_TIMEOUT, retries=MAX_FETCH_RETRIES, method='GET'):
+    """Fetch URL with retries using requests.Session. Returns response or raises exception."""
     last_exc = None
     hdrs = headers or FORWARD_HEADERS
     for attempt in range(1, retries + 1):
-        req = urllib.request.Request(url, headers=hdrs)
         try:
-            resp = urllib.request.urlopen(req, timeout=timeout)
+            resp = _global_session.request(method, url, headers=hdrs, timeout=timeout)
+            # For non-2xx, raise HTTPError to match original behavior
+            resp.raise_for_status()
             return resp
-        except urllib.error.HTTPError as he:
-            # return HTTPError so caller can inspect status (e.g. 418)
-            return he
-        except (urllib.error.URLError, socket.timeout) as e:
+        except requests.exceptions.HTTPError as he:
+            # Return the response for caller to inspect status
+            return resp  # type: ignore
+        except requests.exceptions.RequestException as e:
             last_exc = e
             time.sleep(0.2 * attempt)
-    raise last_exc
+    if last_exc:
+        raise last_exc
+    raise requests.exceptions.RequestException("Failed to fetch after multiple attempts")
 
 def _normalize_strip_psch_pkey(url: str) -> str:
     """Return URL with psch/pkey removed from the query for cache lookups."""
@@ -218,16 +227,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
         # try HEAD first, fall back to GET but do not read body
         try:
-            req = urllib.request.Request(orig, headers=upstream_headers, method='HEAD')
-            try:
-                resp = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
-            except (urllib.error.HTTPError, urllib.error.URLError) as e:
-                # some servers reject HEAD; try a short GET and only inspect headers
-                if isinstance(e, urllib.error.HTTPError) and e.code in (405, 501):
-                    req2 = urllib.request.Request(orig, headers=upstream_headers)
-                    resp = urllib.request.urlopen(req2, timeout=REQUEST_TIMEOUT)
-                else:
-                    raise
+            resp = _fetch_with_retries(orig, headers=upstream_headers, method='HEAD')
         except Exception as e:
             try:
                 self.send_response(502)
@@ -238,9 +238,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             logger.error("HEAD probe failed for %s: %s" % (orig, e))
             return
 
-        # forward upstream status & headers, no body
+        # Handle response
         try:
-            status = getattr(resp, 'status', None) or getattr(resp, 'code', None) or resp.getcode()
+            status = resp.status_code
         except Exception:
             status = 200
         try:
@@ -319,7 +319,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 upstream_headers[hdr] = v
 
         try:
-            resp = _fetch_with_retries(orig, headers=upstream_headers)
+            resp = _fetch_with_retries(orig, headers=upstream_headers, method='GET')
         except Exception as e:
             self.send_response(502)
             self.send_header('Connection', 'close')
@@ -332,7 +332,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             return
 
         # Check for 418 error (indicates invalid segment URL, likely due to wrong key)
-        if isinstance(resp, urllib.error.HTTPError) and getattr(resp, 'code', None) == 418:
+        if resp.status_code == 418:
             logger.error(f"Upstream returned 418 (invalid segment URL) for {orig}. Decode key may be wrong or outdated.")
             _key_fault_detected = True  # Set flag to halt further segment requests
             # For playlists, return custom m3u8 to minimize error dialog
@@ -358,18 +358,17 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 pass
             return
 
-        # Pass through other HTTPError statuses
-        if isinstance(resp, urllib.error.HTTPError):
-            code = getattr(resp, 'code', None)
-            self.send_response(code or 502)
+        # Pass through other HTTPError statuses (using status_code instead of isinstance)
+        if resp.status_code >= 400:
+            self.send_response(resp.status_code)
             self.send_header('Connection', 'close')
             self.end_headers()
             return
 
         try:
-            content_type = resp.headers.get_content_type()
+            content_type = resp.headers.get('Content-Type', '')
         except Exception:
-            content_type = resp.headers.get('Content-Type', '') or ''
+            content_type = ''
 
         is_playlist = orig.endswith('.m3u8') or content_type in (
             'application/vnd.apple.mpegurl', 'application/x-mpegURL', 'text/plain'
@@ -378,18 +377,10 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         # Playlist path (rewrite LL-HLS attribute URIs and plain URLs, inject psch/pkey)
         if is_playlist:
             try:
-                raw = resp.read()
-                enc = (resp.headers.get('Content-Encoding') or '').lower()
-                if 'gzip' in enc:
-                    try:
-                        raw = gzip.decompress(raw)
-                    except Exception as e:
-                        logger.debug("Failed to gunzip playlist: %s" % e)
-                text = raw.decode('utf-8', errors='replace')
-
+                text = resp.text  # requests handles decompression
                 text = _decode_m3u8_mouflon_files(text)
                 psch, pkey = _extract_psch_and_pkey(text)
-                host, port = self.server.server_address
+                host, port = self.server.server_address # type: ignore
 
                 def _inject_and_proxy(abs_url: str) -> str:
                     # no longer force playlistType=web
@@ -454,7 +445,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 return
 
         # Binary/segment path (supports ranges)
-        upstream_status = getattr(resp, 'status', None) or resp.getcode() or 200
+        upstream_status = resp.status_code
         try:
             self.send_response(upstream_status)
         except Exception:
@@ -472,13 +463,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         self.send_header('Connection', 'keep-alive')
         self.end_headers()
 
-        # Original streaming logic
+        # Streaming logic
         first = True
         try:
-            while True:
-                chunk = resp.read(CHUNK_SIZE)
+            for chunk in resp.iter_content(CHUNK_SIZE):
                 if not chunk:
-                    break
+                    continue
                 if first:
                     if b'ftyp' in chunk or b'moov' in chunk or b'sidx' in chunk:
                         logger.debug("Atoms seen in first chunk from %s" % orig)
