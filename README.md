@@ -1,12 +1,12 @@
 # StripChatProxied - A Streamlink Plugin
 
-This is a Streamlink plugin for StripChat that allows you to proxy the playlist files through a local server and decoded the newly added encryption of playlist files.
+This is a Streamlink plugin for StripChat, integrating a proxy for m3u8 playlist file handling.
 
 ## Installation
 
 Put the `stripchat_proxied.py` and `stripchat_proxy.py` in your Streamlink plugins directory.
 
-Additionally, you need a file called `key.txt` in the same directory, containing a working decode key. I WILL NOT PROVIDE THIS KEY FOR YOU. This plugin will not work without it!
+A file called `key.txt` in the same directory will be created on first run and on retrieving a new key on key changes. This reflects a solution to the latest playlist url scrambling by Stripchat in late Augut 2025.
 
 ## Usage from the command line
 
