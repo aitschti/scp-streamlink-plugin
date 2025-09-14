@@ -11,6 +11,7 @@ import os
 import time
 import logging
 import argparse
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,13 +25,21 @@ adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
 _global_session.mount('https://', adapter)
 _global_session.mount('http://', adapter)
 
-# Basic headers to forward when fetching original resources
+# Headers for browser-like requests
 FORWARD_HEADERS = {
     'Referer': 'https://stripchat.com/',
     'Origin': 'https://stripchat.com',
     'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.182 Safari/537.36",
-    'Accept': '*/*'
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Keep-Alive': 'timeout=30, max=1000',
+    'DNT': '1',
 }
+
+# API Endpoints
+API_CONFIG_URL = "https://stripchat.com/api/front/v3/config/static"
 
 # Tunables
 REQUEST_TIMEOUT = 5
@@ -43,20 +52,30 @@ _init_cache = {}
 # Global flag to halt requests after key fault detection
 _key_fault_detected = False
 
+# Global variable for decode key
+_decode_key = None
+
 def _get_decode_key():
-    """Get the decode key from key.txt in the same directory as the script."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    key_file = os.path.join(script_dir, 'key.txt')
+    """Return the cached decode key (loaded at startup or on first call)."""
+    global _decode_key
+    if _decode_key is not None:
+        return _decode_key
+    # Determine script/exe directory
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+    key_file = os.path.join(exe_dir, 'key.txt')
     try:
         with open(key_file, 'r') as f:
-            key = f.read().strip()
-        if not key:
-            logger.error("Decode key is empty in key.txt. Playback will fail for encrypted streams.")
+            _decode_key = f.read().strip()
+        if not _decode_key:
+            logger.error("Decode key is empty in key.txt. Will attempt to fetch on-the-fly.")
             return None
-        logger.debug("Using decode key from key.txt")
-        return key
+        logger.debug("Loaded decode key from key.txt")
+        return _decode_key
     except FileNotFoundError:
-        logger.error("key.txt not found in the script directory. Please create it with the decode key.")
+        logger.error("key.txt not found. Will attempt to fetch on-the-fly.")
         return None
     except Exception as e:
         logger.error(f"Failed to read decode key from key.txt: {e}")
@@ -88,6 +107,69 @@ def _is_valid_decrypted_url(url: str) -> bool:
     pattern = r'^https://.*\.mp4$'
     return bool(re.match(pattern, url))
 
+def _getkey_from_site(pkey):
+    """Fetch the decode key using the pkey from m3u8 data (from scp-standalone.py)."""
+    logger.info("Starting fetch of new decode key...")
+    
+    try:
+        # Get config json from API
+        resp = _global_session.get(API_CONFIG_URL, headers=FORWARD_HEADERS, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        config_data = resp.json()['static']
+        
+        origin = config_data['features']['MMPExternalSourceOrigin']
+        version = config_data['featuresV2']['playerModuleExternalLoading']['mmpVersion']
+        
+        if not origin or not version:
+            logger.warning("Failed to extract URLs from config API.")
+            return
+
+        # Fetch main.js
+        main_js_url = f"{origin}/v{version}/main.js"
+        resp = _global_session.get(main_js_url, headers=FORWARD_HEADERS, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        main_js_text = resp.text
+        
+        # Extract Doppio JS name
+        match = re.search(r'require\("./(Doppio[^"]*\.js)"\)', main_js_text)
+        if not match:
+            logger.error("Doppio JS name not found in main.js")
+            return
+        doppio_name = match.group(1)
+        
+        # Fetch Doppio JS
+        doppio_url = f"{origin}/v{version}/{doppio_name}"
+        resp = _global_session.get(doppio_url, headers=FORWARD_HEADERS, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        doppio_js_text = resp.text
+        
+        # Extract decode key
+        match = re.search(rf'{re.escape(pkey)}:([^"]+)', doppio_js_text)
+        if not match:
+            logger.error(f"pkey {pkey} not found in Doppio JS")
+            return
+        decode_key = match.group(1)
+        logger.info(f"Found the following decode key: {decode_key}")
+        
+        # Set global decode key
+        global _decode_key
+        _decode_key = decode_key
+        
+        # Save to key.txt
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            exe_dir = os.path.dirname(os.path.abspath(__file__))
+        key_file = os.path.join(exe_dir, 'key.txt')
+        with open(key_file, 'w') as f:
+            f.write(decode_key)
+        logger.info("Saved decode key to key.txt")
+        
+    except KeyError as e:
+        logger.warning(f"Failed to extract required fields from config API: {e}")
+    except Exception as e:
+        logger.error(f"Failed to fetch or process data for key fetch: {e}")
+
 def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     """Find '#EXT-X-MOUFLON:FILE:<b64>' lines and replace the next media reference 'media.mp4' with decoded filename."""
     if "#EXT-X-MOUFLON" not in m3u8_text:
@@ -95,8 +177,36 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     lines = m3u8_text.splitlines()
     key = _get_decode_key()
     if key is None:
-        logger.error("Skipping decryption due to missing decode key. Encrypted streams will not play.")
-        return m3u8_text  # Return original without decoding
+        logger.info("Decode key missing. Fetching new key.")
+        psch, pkey = _extract_psch_and_pkey(m3u8_text)
+        _getkey_from_site(pkey)
+        # Check if key is now available and re-decode
+        key = _get_decode_key()
+        if key:
+            logger.info("New key fetched. Re-decoding playlist.")
+            invalid_decryptions = 0
+            for idx, line in enumerate(lines):
+                if line.startswith("#EXT-X-MOUFLON:FILE:"):
+                    enc = line.split(":", 2)[-1].strip()
+                    dec = _mouflon_decrypt_b64(enc, key)
+                    # Find next non-empty line after the tag and replace 'media.mp4' if present
+                    for j in range(idx + 1, min(len(lines), idx + 6)):
+                        candidate = lines[j]
+                        if candidate.strip() == "":
+                            continue
+                        if "media.mp4" in candidate:
+                            new_candidate = candidate.replace("media.mp4", dec)
+                            # Validate the full constructed URL
+                            if not _is_valid_decrypted_url(new_candidate):
+                                logger.warning("Invalid decrypted URL. Decode key may be wrong.")
+                                invalid_decryptions += 1
+                                continue  # Skip replacing this one
+                            if new_candidate != candidate:
+                                lines[j] = new_candidate
+                            break
+            if invalid_decryptions == 0:
+                return "\n".join(lines)
+        return m3u8_text  # Return original if no key or still invalid
     
     invalid_decryptions = 0
     for idx, line in enumerate(lines):
@@ -112,7 +222,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
                     new_candidate = candidate.replace("media.mp4", dec)
                     # Validate the full constructed URL
                     if not _is_valid_decrypted_url(new_candidate):
-                        logger.error(f"Invalid decrypted URL: {new_candidate}. Decode key may be wrong or outdated.")
+                        logger.warning("Invalid decrypted URL. Decode key may be wrong.")
                         invalid_decryptions += 1
                         continue  # Skip replacing this one
                     if new_candidate != candidate:
@@ -120,7 +230,36 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
                     break
     
     if invalid_decryptions > 0:
-        logger.error(f"Decryption failed for {invalid_decryptions} segments. Check decode key in key.txt.")
+        logger.warning(f"Decryption failed for {invalid_decryptions} segments. Decode key may be wrong. Fetching new key.")
+        psch, pkey = _extract_psch_and_pkey(m3u8_text)
+        _getkey_from_site(pkey)
+        # Check if key is now available and re-decode
+        key = _get_decode_key()
+        if key:
+            logger.info("New key fetched. Re-decoding playlist.")
+            lines = m3u8_text.splitlines()  # Reset lines
+            invalid_decryptions = 0
+            for idx, line in enumerate(lines):
+                if line.startswith("#EXT-X-MOUFLON:FILE:"):
+                    enc = line.split(":", 2)[-1].strip()
+                    dec = _mouflon_decrypt_b64(enc, key)
+                    # Find next non-empty line after the tag and replace 'media.mp4' if present
+                    for j in range(idx + 1, min(len(lines), idx + 6)):
+                        candidate = lines[j]
+                        if candidate.strip() == "":
+                            continue
+                        if "media.mp4" in candidate:
+                            new_candidate = candidate.replace("media.mp4", dec)
+                            # Validate the full constructed URL
+                            if not _is_valid_decrypted_url(new_candidate):
+                                logger.warning("Invalid decrypted URL. Decode key may be wrong.")
+                                invalid_decryptions += 1
+                                continue  # Skip replacing this one
+                            if new_candidate != candidate:
+                                lines[j] = new_candidate
+                            break
+            if invalid_decryptions == 0:
+                return "\n".join(lines)
         # If all decryptions fail, return original to avoid broken stream
         if invalid_decryptions == len([l for l in lines if l.startswith("#EXT-X-MOUFLON:FILE:")]):
             logger.error("All decryptions invalid. Returning original m3u8.")
