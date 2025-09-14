@@ -1,15 +1,16 @@
 from asyncio import streams
+import logging
 import re
-import io  # Added import for io
-import tempfile  # Added import for tempfile
-import socket  # Added for port check
-import subprocess  # Added for starting proxy
-import time  # Added for delay
-import os  # Added for path
+import io
+import tempfile 
+import socket
+import subprocess
+import time 
+import os
 from typing import Optional
 from urllib.parse import urlparse, quote
-from pathlib import Path  # Add this import for cross-platform path handling
-import streamlink  # Add this import for version checking
+from pathlib import Path 
+import streamlink 
 
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate
@@ -51,6 +52,27 @@ class StripchatProxy(Plugin):
         
         self.author: Optional[str] = None
         self.title: Optional[str] = None
+        # New: Track proxy subprocess and whether we started it
+        self._proxy_process: Optional[subprocess.Popen] = None
+        self._started_proxy: bool = False
+
+    def __del__(self):
+        """Cleanup: Terminate the proxy subprocess if we started it."""
+        logger = logging.getLogger(__name__)  # Use standard logging for consistency
+        if self._started_proxy and self._proxy_process and self._proxy_process.poll() is None:
+            try:
+                logger.info("Terminating proxy subprocess...")
+                self._proxy_process.terminate()
+                self._proxy_process.wait(timeout=5)  # Wait up to 5s for graceful shutdown
+                logger.info("Proxy subprocess terminated.")
+            except subprocess.TimeoutExpired:
+                logger.warning("Proxy subprocess did not terminate gracefully; force killing...")
+                self._proxy_process.kill()
+                self._proxy_process.wait()
+            except Exception as e:
+                logger.error(f"Error terminating proxy subprocess: {e}")
+        self._proxy_process = None
+        self._started_proxy = False
 
     def get_title(self) -> Optional[str]:
         return self.title
@@ -83,12 +105,16 @@ class StripchatProxy(Plugin):
         
         try:
             self.logger.info(f"Starting proxy on {host}:{port}")
-            subprocess.Popen(['python', proxy_script_path, '--host', host, '--port', str(port)], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Start and store the process
+            self._proxy_process = subprocess.Popen(['python', proxy_script_path, '--host', host, '--port', str(port)], 
+                                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._started_proxy = True  # Mark that we started it
             time.sleep(2)  # Wait for proxy to start
             return True
         except Exception as e:
             self.logger.error(f"Failed to start proxy: {e}")
+            self._proxy_process = None
+            self._started_proxy = False
             return False
 
     def _get_streams(self):
@@ -115,6 +141,7 @@ class StripchatProxy(Plugin):
             "Content-Type": "application/x-www-form-urlencoded",
             "X-Requested-With": "XMLHttpRequest",
             "Referer": f"https://www.stripchat.com/{username}",
+            "Origin": "https://www.stripchat.com",
             "User-Agent": self.session.http.headers.get("User-Agent", "")
         }
 
