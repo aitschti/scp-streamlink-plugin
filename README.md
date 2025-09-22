@@ -6,7 +6,7 @@ This is a Streamlink plugin for StripChat, integrating a proxy for m3u8 playlist
 
 Put the `stripchat_proxied.py` and `stripchat_proxy.py` in your Streamlink plugins directory.
 
-A file called `key.txt` in the same directory will be created on first run and changed on retrieving a new key on key changes. This reflects a solution to the latest playlist url scrambling by Stripchat in late Augut 2025.
+A file called `key.txt` in the same directory will be created on first run and changed on retrieving a new key on key changes. This reflects a solution to the latest playlist url scrambling by Stripchat in late August 2025.
 
 ## Usage from the command line
 
