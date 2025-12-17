@@ -1,5 +1,7 @@
 # StripChatProxied - A Streamlink Plugin
 
+**DEC '25 UPDATE: AUTOMATIC KEY FETCHING IS BROKEN ATM, NOTHING I CAN DO. OLD KEY REMAINS VALID FOR NOW. RETRY CONNECTION IF IT FAILS, THEY SWITCH AROUND OTHER KEYS**
+
 This is a Streamlink plugin for StripChat, integrating a proxy for m3u8 playlist file handling.
 
 ## Installation
