@@ -268,7 +268,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     return "\n".join(lines)
 
 def _extract_psch_and_pkey(m3u8_text):
-    """Return (psch_version, pkey) from the last #EXT-X-MOUFLON:PSCH line if present (ignores earlier ones)."""
+    """Return (psch_version, pkey) from #EXT-X-MOUFLON:PSCH line if present."""
     psch_lines = []
     for line in m3u8_text.splitlines():
         l = line.strip()
@@ -276,15 +276,22 @@ def _extract_psch_and_pkey(m3u8_text):
             continue
         if l.upper().startswith('#EXT-X-MOUFLON:PSCH'):
             psch_lines.append(l)
-    if psch_lines:
-        # Use the last (second) PSCH line if multiple are found
-        last_line = psch_lines[-1]
-        parts = last_line.split(':', 3)
-        version = parts[2].lower() if len(parts) > 2 else ''
-        pkey = parts[3] if len(parts) > 3 else ''
-        return version, pkey
 
-    return '', ''
+    if not psch_lines:
+        return '', ''
+
+    # Prefer the last 'v1' PSCH line if present
+    v1_lines = []
+    for l in psch_lines:
+        parts_tmp = l.split(':', 3)
+        if len(parts_tmp) > 2 and parts_tmp[2].lower().startswith('v1'):
+            v1_lines.append(l)
+
+    selected_line = v1_lines[-1] if v1_lines else psch_lines[-1]
+    parts = selected_line.split(':', 3)
+    version = parts[2].lower() if len(parts) > 2 else ''
+    pkey = parts[3] if len(parts) > 3 else ''
+    return version, pkey
 
 def _make_absolute(base, ref):
     return urllib.parse.urljoin(base, ref)
