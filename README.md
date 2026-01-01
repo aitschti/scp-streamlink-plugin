@@ -1,14 +1,40 @@
 # StripChatProxied - A Streamlink Plugin
 
-**DEC '25 UPDATE: AUTOMATIC KEY FETCHING IS BROKEN ATM, NOTHING I CAN DO. OLD KEY REMAINS VALID FOR NOW. RETRY CONNECTION IF IT FAILS, THEY SWITCH AROUND OTHER KEYS**
+**JAN '26 UPDATE: Two versions available now. V2 (recommended) is more flexible with key selection.**
 
-This is a Streamlink plugin for StripChat, integrating a proxy for m3u8 playlist file handling.
+This is a Streamlink plugin for StripChat, integrating a proxy for m3u8 playlist file handling and decoding of scrambled playlist URLs.
+
+## Versions
+
+- **stripchat_proxied_v2.py** (RECOMMENDED): The new v2-only implementation with robust PSCH line selection. Uses `keys.txt` with format `pkey:pdkey` to automatically match the correct v2 encryption line from master playlists, no matter which position the key has in the playlist. This version is more flexible as Stripchat may possibly rotate between multiple v2 keys, and the proxy automatically selects the matching one.
+
+- **stripchat_proxied.py** (LEGACY): The original implementation. Uses `key.txt` for single key storage and is set to use last available pkey. This version will be replaced by v2 in the future.
+
+## Files
+
+### V2 Version (Recommended)
+
+- **stripchat_proxied_v2.py / stripchat_proxy_v2.py**: The recommended v2 proxy implementation. Handles v2 playlist decryption with key matching. Uses `keys.txt` for key storage in `pkey:pdkey` format.
+
+- **keys.txt**: Required for v2 version. Stores key pair in format `pkey:pdkey` (e.g., `Zeec...:ubah...`). The pkey determines which v2 PSCH line to use, pdkey decrypts the segments.
+
+### Legacy Version
+
+- **stripchat_proxy.py / stripchat_proxied.py**: The legacy proxy implementation. Uses `key.txt` for single key storage.
+
+- **key.txt**: Used by legacy version only. Stores single decryption key. Proxy will use last available pkey, no matter what.
 
 ## Installation
 
-Put the `stripchat_proxied.py` and `stripchat_proxy.py` in your Streamlink plugins directory.
+### For V2 Version (Recommended)
 
-A file called `key.txt` in the same directory will be created on first run and changed on retrieving a new key on key changes. This reflects a solution to the latest playlist url scrambling by Stripchat in late August 2025.
+1. Put `stripchat_proxied_v2.py` and `stripchat_proxy_v2.py` in your Streamlink plugins directory.
+2. Create a `keys.txt` file in the same directory with format `pkey:pdkey` (e.g., `Zeec...:ubah...`).
+
+### For Legacy Version
+
+1. Put `stripchat_proxied.py` and `stripchat_proxy.py` in your Streamlink plugins directory.
+2. Create a `key.txt` file in the same directory with the decryption key.
 
 ## Usage from the command line
 
@@ -38,6 +64,8 @@ When using `--player-external-http`, you may need to adjust your firewall settin
 
 ## Notes
 
+- Both proxy versions require manual key management - no automatic key fetching
 - Working and tested on Windows and MacOS, Linux untested
+- **IMPORTANT**: Only use ONE proxy version in your plugins directory at a time
 
-This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin. It is completely vibe coded, so expect bugs and issues.
+This plugin is for educational purposes only. Use it at your own risk. I am not responsible for any consequences that may arise from using this plugin.
